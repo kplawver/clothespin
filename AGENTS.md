@@ -4,7 +4,7 @@ Guidance for coding agents working in this repo.
 
 ## What this is
 
-Clothespin bridges local [clothesline](https://github.com/) MCP message-bus
+Clothespin bridges local [clothesline](https://github.com/kplawver/clothesline) MCP message-bus
 sessions across machines. Each participant runs `mix pin.connect` locally; it
 connects their clothesline `/mcp` endpoint to a shared pin (room) on the
 clothespin server over a WebSocket (`/bridge`). Agents on different machines

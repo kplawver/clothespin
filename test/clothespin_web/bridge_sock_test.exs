@@ -82,6 +82,34 @@ defmodule ClothespinWeb.BridgeSockTest do
     assert [%{body: "hello beta"}] = Relay.snapshot(room).messages
   end
 
+  test "duplicate message pushes nothing to other bridges", %{room: room, state: state} do
+    state =
+      case BridgeSock.handle_in(frame("hello", 1, %{"site_name" => "alpha"}), state) do
+        {:reply, :ok, _msgs, s} -> s
+      end
+
+    # This test process pretends to be the "beta" bridge socket: pushes
+    # targeted at beta land in our mailbox.
+    :ok = SiteRegistry.register(room.id, "beta", self())
+
+    msg = %{
+      "conversation" => %{"origin_site" => "alpha", "origin_ref" => "conv-dup", "title" => "T"},
+      "client_message_id" => "cm-dup",
+      "sender_agent_ref" => "agent-1",
+      "sender_external_id" => "alpha agent",
+      "body" => "dup body"
+    }
+
+    {:reply, :ok, _msgs, _s1} = BridgeSock.handle_in(frame("message", 10, msg), state)
+    assert_receive {:push, json}
+    assert json =~ "dup body"
+
+    # Replayed frame: recorded as a duplicate, but nothing is re-pushed.
+    {:reply, :ok, _msgs, _s2} = BridgeSock.handle_in(frame("message", 11, msg), state)
+    refute_receive {:push, _json}, 200
+  end
+
+
   test "agent_event upserts presence and echoes to other bridges", %{room: room, state: state} do
     state =
       case BridgeSock.handle_in(frame("hello", 1, %{"site_name" => "alpha"}), state) do

@@ -42,8 +42,7 @@ defmodule Clothespin.Bridge.Injector do
         })
 
       result
-    else
-      {:error, reason} -> {:error, reason}
+
     end
   end
 

@@ -251,6 +251,23 @@ def run_assertions(pin, A, B, a_tok, b_tok, session, stamp, ha, aa, hb, ab):
     n = len([m for m in B.exact(bcast_body)])
     assert_(n == 1, f"duplicate cmid not re-delivered (count={n})")
 
+    # --- late-registered agent (regression: unknown sender at poll time) ---
+    # The agent registers AFTER the bridges connected, so the pump's local
+    # cache does not know it when the message hits the poll queue; the
+    # refresh-on-unknown-sender path must deliver it anyway.
+    h2 = A.tool("register_harness", {"installation_key": f"e2e-late-{stamp}",
+                                     "name": "Late harness"})["harness_id"]
+    late = A.tool("register_agent", {"harness_id": h2, "external_id": "late-agent",
+                                     "name": "Late Agent"})
+    A.tool("agent_online", {"harness_id": h2, "agent_id": late["agent_id"]})
+    conv3 = A.tool("open_conversation", {"harness_id": h2, "agent_id": late["agent_id"],
+                                         "title": "late", "project_key": "e2e"})["conversation_id"]
+    late_body = f"late agent checking in {stamp}"
+    A.send(h2, late["agent_id"], conv3, f"late-{stamp}", late_body)
+    wait_until(lambda: [m for m in B.exact(late_body)], CROSS_MIRROR_TIMEOUT,
+               "late-agent message on bus B")
+    ok("late-registered agent delivered (poll-time sender refresh)")
+
     # --- human chat via the web form fallback is visible to both buses ---
     human_body = f"human hello {stamp}"
     human_post(session["room_id"], f"e2e-a-{stamp}", "alpha passphrase 123",

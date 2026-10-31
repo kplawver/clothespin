@@ -88,19 +88,23 @@ defmodule Clothespin.Bridge.Pump do
         Enum.each(messages, fn message ->
           sender_id = message["sender_agent_id"]
 
-          if sender_id == poller.agent_id or sender_id == bridge_agent_id or
-               Registry.mirror_by_agent_id(sender_id) do
-            # Injection echo (ours or another pin-originated row) — bus-local only.
-            :ok
-          else
-            forward_message(poller, message)
-          end
+          result =
+            if sender_id == poller.agent_id or sender_id == bridge_agent_id or
+                 Registry.mirror_by_agent_id(sender_id) do
+              # Injection echo (ours or another pin-originated row) — bus-local only.
+              :skip
+            else
+              forward_message(message)
+            end
 
-          McpClient.tool(url, "ack_message", %{
-            "harness_id" => harness,
-            "agent_id" => poller.agent_id,
-            "message_id" => message["id"]
-          })
+          # :retry leaves the message unacked so the next poll re-processes it.
+          unless result == :retry do
+            McpClient.tool(url, "ack_message", %{
+              "harness_id" => harness,
+              "agent_id" => poller.agent_id,
+              "message_id" => message["id"]
+            })
+          end
         end)
 
         max_id = messages |> Enum.map(& &1["id"]) |> Enum.max()
@@ -111,50 +115,78 @@ defmodule Clothespin.Bridge.Pump do
     end
   end
 
-  defp forward_message(_poller, message) do
-    sender_id = message["sender_agent_id"]
+  # :ok — forwarded (or the pin deduped it); :skip — nothing to do; :retry —
+  # transient failure, the poller leaves the message unacked for the next pass.
+  defp forward_message(message) do
+    case resolve_sender(message["sender_agent_id"]) do
+      {:ok, sender} ->
+        conv_info =
+          Registry.local_conv_info(message["conversation_id"]) ||
+            %{title: "bridged conversation", project_key: nil}
 
-    # An agent registered after our last 30s diff isn't in the local cache
-    # yet; refresh once instead of dropping its message (we ack right after).
-    sender =
-      Registry.local_agent(sender_id) ||
-        (Registry.refresh_locals() && Registry.local_agent(sender_id))
+        recipient_mirror =
+          case message["recipient_agent_id"] do
+            nil -> nil
+            recipient_id -> Registry.mirror_by_agent_id(recipient_id)
+          end
 
-    if sender do
-      conv_info =
-        Registry.local_conv_info(message["conversation_id"]) ||
-          %{title: "bridged conversation", project_key: nil}
+        frame = %{
+          "conversation" => %{
+            "origin_site" => Registry.site(),
+            "origin_ref" => message["conversation_id"],
+            "title" => conv_info.title,
+            "project_key" => conv_info.project_key
+          },
+          "client_message_id" => message["client_message_id"],
+          "sender_agent_ref" => sender["external_id"],
+          "sender_external_id" => sender["external_id"],
+          "body" => message["body"] || ""
+        }
 
-      recipient_mirror =
-        case message["recipient_agent_id"] do
-          nil -> nil
-          recipient_id -> Registry.mirror_by_agent_id(recipient_id)
+        frame =
+          if recipient_mirror do
+            Map.merge(frame, %{
+              "recipient_site" => recipient_mirror.site,
+              "recipient_agent_ref" => recipient_mirror.agent_ref
+            })
+          else
+            frame
+          end
+
+        case Link.call("message", frame) do
+          {:ok, _} -> :ok
+          {:error, _reason} -> :retry
         end
 
-      frame = %{
-        "conversation" => %{
-          "origin_site" => Registry.site(),
-          "origin_ref" => message["conversation_id"],
-          "title" => conv_info.title,
-          "project_key" => conv_info.project_key
-        },
-        "client_message_id" => message["client_message_id"],
-        "sender_agent_ref" => sender["external_id"],
-        "sender_external_id" => sender["external_id"],
-        "body" => message["body"] || ""
-      }
+      # Refreshed but not one of ours (another bridge's mirror raced onto the
+      # bus) — the origin site already forwarded it.
+      :foreign ->
+        :skip
 
-      frame =
-        if recipient_mirror do
-          Map.merge(frame, %{
-            "recipient_site" => recipient_mirror.site,
-            "recipient_agent_ref" => recipient_mirror.agent_ref
-          })
-        else
-          frame
+      # Local cache refresh failed (bus hiccup) — leave unacked, retry later.
+      :unavailable ->
+        :retry
+    end
+  end
+
+  # An agent registered after the last 30s announce diff is not in the local
+  # cache yet; refresh once so its first message is never dropped.
+  defp resolve_sender(sender_id) do
+    case Registry.local_agent(sender_id) do
+      nil ->
+        case Registry.refresh_locals() do
+          :ok ->
+            case Registry.local_agent(sender_id) do
+              nil -> :foreign
+              agent -> {:ok, agent}
+            end
+
+          {:error, :unavailable} ->
+            :unavailable
         end
 
-      Link.call("message", frame)
+      agent ->
+        {:ok, agent}
     end
   end
 

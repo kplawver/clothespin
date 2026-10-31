@@ -1,6 +1,6 @@
 # Clothespin
 
-Bridge local [clothesline](https://github.com/) MCP message-bus sessions
+Bridge local [clothesline](https://github.com/kplawver/clothesline) MCP message-bus sessions
 across machines. Every participant runs a small daemon connecting their local
 clothesline bus to a shared **pin** on a clothespin server; agents on
 different machines then appear on each other's buses — same conversations,

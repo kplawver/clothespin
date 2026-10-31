@@ -75,8 +75,12 @@ defmodule Clothespin.Bridge.Registry do
         # foreign mirror shares the conversation yet.
         case ensure_bridge_agent(state) do
           {:ok, bridge_agent} ->
-            # Seed local agents so the first hello can announce them.
-            {:ok, refresh_local_agents(%{state | bridge_agent: bridge_agent})}
+            # Seed local agents so the first hello can announce them. A failed
+            # seed is non-fatal: the pump refreshes on first unknown sender and
+            # the 30s announce diff retries.
+            state = %{state | bridge_agent: bridge_agent}
+
+            {:ok, elem(refresh_local_agents(state), 1)}
 
           {:error, reason} ->
             {:stop, {:bridge_agent_failed, reason}}
@@ -109,8 +113,12 @@ defmodule Clothespin.Bridge.Registry do
 
   def handle_call(:local_agents, _from, state), do: {:reply, Map.values(state.local_agents), state}
 
-  def handle_call(:refresh_locals, _from, state),
-    do: {:reply, :ok, refresh_local_agents(state)}
+  def handle_call(:refresh_locals, _from, state) do
+    case refresh_local_agents(state) do
+      {:ok, new_state} -> {:reply, :ok, new_state}
+      {:error, _} -> {:reply, {:error, :unavailable}, state}
+    end
+  end
 
   def handle_call({:local_conv_info, local_conv_id}, _from, state) do
     case Map.fetch(state.local_convs, local_conv_id) do
@@ -207,6 +215,8 @@ defmodule Clothespin.Bridge.Registry do
 
   # Local agents = rows under other harnesses whose external_id is not a pin
   # mirror (ours or another bridge's on the same bus).
+  # Returns {:ok, state} | {:error, :unavailable} so callers can retry on
+  # transient bus errors instead of acting on a stale cache.
   defp refresh_local_agents(state) do
     case McpClient.tool(state.mcp_url, "list_agents", %{"include_inactive" => true}) do
       {:ok, %{"agents" => agents}} ->
@@ -217,11 +227,15 @@ defmodule Clothespin.Bridge.Registry do
               not String.starts_with?(a["external_id"], @pin_prefix)
           end)
 
-        %{state | local_agents: Map.new(locals, &{&1["id"], &1}),
-          local_by_external: Map.new(locals, &{&1["external_id"], &1["id"]})}
+        {:ok,
+         %{
+           state
+           | local_agents: Map.new(locals, &{&1["id"], &1}),
+             local_by_external: Map.new(locals, &{&1["external_id"], &1["id"]})
+         }}
 
       _ ->
-        state
+        {:error, :unavailable}
     end
   end
 
