@@ -31,6 +31,15 @@ defmodule ClothespinWeb.Router do
     get "/bridge", BridgeController, :upgrade
   end
 
+  # MCP endpoint: stateless streamable HTTP, no browser pipeline (no CSRF,
+  # no layout). Agents speak JSON-RPC here.
+  forward "/mcp",
+          ExMCP.HttpPlug,
+          handler: Clothespin.MCP,
+          server_info: %{name: "clothespin", version: "0.1.0"},
+          protocol_mode: :http,
+          cors_enabled: true
+
   # Other scopes may use custom stacks.
   # scope "/api", ClothespinWeb do
   #   pipe_through :api
