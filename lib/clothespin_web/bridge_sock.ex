@@ -31,7 +31,18 @@ defmodule ClothespinWeb.BridgeSock do
   end
 
   @impl true
-  def handle_in({text, :text}, state) do
+  # Bandit's websock adapter passes {data, [opcode: :text]} — the opcode
+  # arrives as a keyword list, not a bare atom.
+  def handle_in({text, [opcode: :text]}, state), do: handle_text(text, state)
+  def handle_in({text, :text}, state), do: handle_text(text, state)
+
+  def handle_in({_binary, [opcode: :binary]}, state),
+    do: error_reply(nil, "binary frames not supported", state)
+
+  def handle_in({_binary, :binary}, state),
+    do: error_reply(nil, "binary frames not supported", state)
+
+  defp handle_text(text, state) do
     case Jason.decode(text) do
       {:ok, %{"op" => op, "ref" => ref} = frame} when is_integer(ref) ->
         if state.site || op in ["hello", "ping"] do
@@ -44,9 +55,6 @@ defmodule ClothespinWeb.BridgeSock do
         {:stop, :normal, {4002, "malformed frame"}, state}
     end
   end
-
-  def handle_in({_binary, :binary}, state),
-    do: error_reply(nil, "binary frames not supported", state)
 
   @impl true
   def handle_info({:push, text}, state) do

@@ -54,6 +54,7 @@ defmodule Clothespin.MixProject do
       {:gettext, "~> 1.0"},
       {:jason, "~> 1.2"},
       {:bcrypt_elixir, "~> 3.0"},
+      {:req, "~> 0.5"},
       {:ex_mcp, "~> 1.0"},
       {:gun, "~> 2.0"},
       {:websock, "~> 0.5"},
