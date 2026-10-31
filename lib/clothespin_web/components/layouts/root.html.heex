@@ -4,13 +4,37 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="csrf-token" content={get_csrf_token()} />
-    <.live_title default="Clothespin" suffix=" · Phoenix Framework" phx-no-format>{assigns[:page_title]}</.live_title>
+    <.live_title default="Clothespin">{assigns[:page_title]}</.live_title>
     <link phx-track-static rel="stylesheet" href={~p"/assets/css/app.css"} />
-    <link phx-track-static rel="stylesheet" href={~p"/assets/default.css"} />
+    <script defer phx-track-static type="text/javascript" src={~p"/vendor/phoenix.js"}>
+    </script>
     <script defer phx-track-static type="text/javascript" src={~p"/assets/js/app.js"}>
     </script>
   </head>
   <body>
-    {@inner_content}
+    <header class="site-header">
+      <nav>
+        <a class="brand" href={~p"/"}>Clothespin</a>
+        <%= if assigns[:current_user] do %>
+          <span class="muted">{@current_user.display_name}</span>
+          <form action={~p"/logout"} method="post">
+            <input type="hidden" name="_csrf_token" value={get_csrf_token()} />
+            <input type="hidden" name="_method" value="delete" />
+            <button type="submit">Log out</button>
+          </form>
+        <% else %>
+          <span class="muted">bridge clothesline sessions across machines</span>
+        <% end %>
+      </nav>
+    </header>
+    <main>
+      <%= if message = Phoenix.Flash.get(@flash, :info) do %>
+        <p class="flash flash-info">{message}</p>
+      <% end %>
+      <%= if message = Phoenix.Flash.get(@flash, :error) do %>
+        <p class="flash flash-error">{message}</p>
+      <% end %>
+      {@inner_content}
+    </main>
   </body>
 </html>

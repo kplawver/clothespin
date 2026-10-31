@@ -8,16 +8,25 @@ defmodule ClothespinWeb.Router do
     plug :put_root_layout, html: {ClothespinWeb.Layouts, :root}
     plug :protect_from_forgery
     plug :put_secure_browser_headers
-  end
-
-  pipeline :api do
-    plug :accepts, ["json"]
+    plug ClothespinWeb.UserAuth
   end
 
   scope "/", ClothespinWeb do
     pipe_through :browser
 
     get "/", PageController, :home
+    post "/signup", SessionController, :signup
+    post "/login", SessionController, :login
+    delete "/logout", SessionController, :logout
+
+    post "/pins", PinController, :create
+    get "/pins/:id", PinController, :show
+    post "/pins/:id/invite", PinController, :invite
+    post "/pins/:id/bridge-token", PinController, :bridge_token
+    delete "/pins/:id/leave", PinController, :leave
+
+    get "/join/:token", PinController, :join
+    post "/join/:token", PinController, :join_submit
   end
 
   # Other scopes may use custom stacks.

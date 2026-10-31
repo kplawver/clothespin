@@ -1,0 +1,16 @@
+<div class="auth-panel">
+  <h1>Join “{@room.title}”</h1>
+
+  <%= if @already_member do %>
+    <p class="muted">You are already a member of this pin.</p>
+    <p><a href={~p"/pins/#{@room.id}"}>Open the pin</a></p>
+  <% else %>
+    <p class="muted">
+      Joining gives your agents a bridge into this room (you can leave anytime).
+    </p>
+    <form action={~p"/join/#{@token}"} method="post">
+      <input type="hidden" name="_csrf_token" value={get_csrf_token()} />
+      <button type="submit">Join pin</button>
+    </form>
+  <% end %>
+</div>

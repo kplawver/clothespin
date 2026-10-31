@@ -1,0 +1,73 @@
+<div class="room-page">
+  <div class="room-header">
+    <h1>{@room.title}</h1>
+    <form action={~p"/pins/#{@room.id}/leave"} method="post" class="inline">
+      <input type="hidden" name="_csrf_token" value={get_csrf_token()} />
+      <input type="hidden" name="_method" value="delete" />
+      <button type="submit" class="secondary">Leave pin</button>
+    </form>
+  </div>
+
+  <div class="room-layout">
+    <nav>
+      <h2>Conversations</h2>
+      <p class="muted">Populated by bridge traffic and web chat.</p>
+    </nav>
+
+    <section>
+      <div class="messages" id="messages" data-room-id={@room.id}>
+        <p class="muted">Loading…</p>
+      </div>
+      <form id="compose" class="compose">
+        <input type="hidden" name="_csrf_token" value={get_csrf_token()} />
+        <label for="compose-body">Message</label>
+        <textarea
+          id="compose-body"
+          name="body"
+          rows="3"
+          placeholder="Message everyone in this pin…"
+        ></textarea>
+        <button type="submit">Send</button>
+      </form>
+    </section>
+
+    <aside>
+      <h2>Participants</h2>
+      <ul class="participants">
+        <%= for {user, role} <- @members do %>
+          <li>
+            {user.display_name} <span class="muted">({role})</span>
+          </li>
+        <% end %>
+      </ul>
+
+      <div class="setup-block">
+        <h2>Invite a teammate</h2>
+        <p class="muted">Anyone with this link can join for 7 days:</p>
+        <textarea readonly id="invite-link">{@invite_url}</textarea>
+        <form action={~p"/pins/#{@room.id}/invite"} method="post">
+          <input type="hidden" name="_csrf_token" value={get_csrf_token()} />
+          <button type="submit" class="secondary">Regenerate link</button>
+        </form>
+      </div>
+
+      <div class="setup-block">
+        <h2>Bridge this machine</h2>
+        <p class="muted">
+          Run the bridge daemon locally to relay your clothesline into this pin.
+        </p>
+        <%= if @bridge_token do %>
+          <p>Bridge token:</p>
+          <textarea readonly>{@bridge_token}</textarea>
+          <p>Then run:</p>
+          <pre>{@bridge_command}</pre>
+        <% else %>
+          <form action={~p"/pins/#{@room.id}/bridge-token"} method="post">
+            <input type="hidden" name="_csrf_token" value={get_csrf_token()} />
+            <button type="submit" class="secondary">Generate bridge token</button>
+          </form>
+        <% end %>
+      </div>
+    </aside>
+  </div>
+</div>

@@ -1,0 +1,31 @@
+<div class="dashboard">
+  <h1>Your pins</h1>
+  <p class="muted">
+    A pin is a shared room. Pin this machine, then send the invite link to a teammate.
+  </p>
+
+  <section class="new-pin">
+    <h2>New pin</h2>
+    <form action={~p"/pins"} method="post">
+      <input type="hidden" name="_csrf_token" value={get_csrf_token()} />
+      <label for="pin-title">Title</label>
+      <input id="pin-title" name="title" placeholder="e.g. shared plan" required maxlength="200" />
+      <button type="submit">Create pin</button>
+    </form>
+  </section>
+
+  <%= if @rooms == [] do %>
+    <p class="muted">
+      No pins yet. Create one above — you'll get an invite link and a bridge command.
+    </p>
+  <% else %>
+    <ul class="room-list">
+      <%= for room <- @rooms do %>
+        <li>
+          <a href={~p"/pins/#{room.id}"}>{room.title}</a>
+          <span class="muted">{if room.owner_id == @current_user.id, do: "owner", else: "member"}</span>
+        </li>
+      <% end %>
+    </ul>
+  <% end %>
+</div>
