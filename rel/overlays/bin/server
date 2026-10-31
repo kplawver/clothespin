@@ -1,0 +1,10 @@
+#!/bin/sh
+set -eu
+
+cd -P -- "$(dirname -- "$0")"
+
+# Migrate on every boot so a fresh database (or an upgraded deploy) is ready
+# before the endpoint accepts traffic.
+./clothespin eval Clothespin.Release.migrate
+
+PHX_SERVER=true exec ./clothespin start
