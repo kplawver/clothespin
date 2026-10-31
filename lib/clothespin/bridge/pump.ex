@@ -111,8 +111,14 @@ defmodule Clothespin.Bridge.Pump do
     end
   end
 
-  defp forward_message(_mirror, message) do
-    sender = Registry.local_agent(message["sender_agent_id"])
+  defp forward_message(_poller, message) do
+    sender_id = message["sender_agent_id"]
+
+    # An agent registered after our last 30s diff isn't in the local cache
+    # yet; refresh once instead of dropping its message (we ack right after).
+    sender =
+      Registry.local_agent(sender_id) ||
+        (Registry.refresh_locals() && Registry.local_agent(sender_id))
 
     if sender do
       conv_info =

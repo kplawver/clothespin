@@ -42,6 +42,7 @@ defmodule Clothespin.Bridge.Registry do
   def mirror_by_agent_id(agent_id), do: GenServer.call(__MODULE__, {:mirror_by_agent_id, agent_id})
   def local_agent(agent_id), do: GenServer.call(__MODULE__, {:local_agent, agent_id})
   def local_agent_by_external(external_id), do: GenServer.call(__MODULE__, {:local_agent_by_external, external_id})
+  def refresh_locals, do: GenServer.call(__MODULE__, :refresh_locals)
   def local_agents, do: GenServer.call(__MODULE__, :local_agents)
   def local_conv_info(local_conv_id), do: GenServer.call(__MODULE__, {:local_conv_info, local_conv_id})
   def server_conv_local(server_conv_id), do: GenServer.call(__MODULE__, {:server_conv_local, server_conv_id})
@@ -107,6 +108,9 @@ defmodule Clothespin.Bridge.Registry do
     do: {:reply, Map.get(state.local_by_external, external_id), state}
 
   def handle_call(:local_agents, _from, state), do: {:reply, Map.values(state.local_agents), state}
+
+  def handle_call(:refresh_locals, _from, state),
+    do: {:reply, :ok, refresh_local_agents(state)}
 
   def handle_call({:local_conv_info, local_conv_id}, _from, state) do
     case Map.fetch(state.local_convs, local_conv_id) do

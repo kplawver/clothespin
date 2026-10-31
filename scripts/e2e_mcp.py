@@ -88,6 +88,10 @@ class Bus:
     def search(self, body):
         return self.tool("search_messages", {"query": body, "limit": 50})["results"]
 
+    def exact(self, body):
+        """search_messages keyword-matches; filter for the exact body."""
+        return [m for m in self.search(body) if m["body"] == body]
+
 
 class Pin:
     def __init__(self, name):
@@ -180,7 +184,31 @@ def main():
                                    "name": "B Agent"})
     B.tool("agent_online", {"harness_id": hb, "agent_id": ab["agent_id"]})
 
-    # --- cross-mirroring: each bus eventually hosts the other's agent ---
+    # --- start the two bridges (the daemon an agent would run) ---
+    repo = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    logdir = "/tmp/clothespin-e2e"
+    os.makedirs(logdir, exist_ok=True)
+    bridges = []
+    for site, tok, bus in (("alpha", session["bridge_token"], BUS_A),
+                           ("beta", joined["bridge_token"], BUS_B)):
+        log = open(f"{logdir}/bridge-{site}.log", "w")
+        bridges.append(subprocess.Popen(
+            ["mix", "pin.connect", "--server", CLOTHESPIN, "--bridge-token", tok,
+             "--clothesline", bus, "--site", site],
+            cwd=repo, stdout=log, stderr=subprocess.STDOUT))
+
+    try:
+        wait_until(lambda: {"alpha", "beta"} <= set(
+            pin.status(a_tok, session["room_id"])["bridges"]), 30,
+            "both bridges connected")
+        ok("both bridges connected")
+        run_assertions(pin, A, B, a_tok, b_tok, session, stamp, ha, aa, hb, ab)
+    finally:
+        for p in bridges:
+            p.terminate()
+
+
+def run_assertions(pin, A, B, a_tok, b_tok, session, stamp, ha, aa, hb, ab):
     mirror_b_on_a = wait_until(
         lambda: next((a for a in A.agents() if a["external_id"] == "pin:beta:b-agent"), None),
         CROSS_MIRROR_TIMEOUT, "b-agent mirrored on bus A")
@@ -195,7 +223,7 @@ def main():
                                         "title": "direct", "project_key": "e2e"})["conversation_id"]
     A.send(ha, aa["agent_id"], conv, f"direct-{stamp}", "direct alpha to beta",
            recipient=mirror_b_on_a["id"])
-    hit = wait_until(lambda: [m for m in B.search("direct alpha to beta")], DELIVERY_TIMEOUT,
+    hit = wait_until(lambda: [m for m in B.exact("direct alpha to beta")], DELIVERY_TIMEOUT,
                      "direct A->B message")
     ok(f"direct A->B delivered (bus B id {hit[0]['id']})")
 
@@ -204,31 +232,34 @@ def main():
                                           "title": "reply", "project_key": "e2e"})["conversation_id"]
     B.send(hb, ab["agent_id"], conv_b, f"reply-{stamp}", "direct beta to alpha",
            recipient=mirror_a_on_b["id"])
-    wait_until(lambda: [m for m in A.search("direct beta to alpha")], DELIVERY_TIMEOUT,
+    wait_until(lambda: [m for m in A.exact("direct beta to alpha")], DELIVERY_TIMEOUT,
                "direct B->A message")
     ok("direct B->A delivered")
 
     # --- broadcast A -> B ---
     conv2 = A.tool("open_conversation", {"harness_id": ha, "agent_id": aa["agent_id"],
                                          "title": "broadcast", "project_key": "e2e"})["conversation_id"]
-    A.send(ha, aa["agent_id"], conv2, f"bc-{stamp}", "broadcast from alpha")
-    wait_until(lambda: [m for m in B.search("broadcast from alpha")], DELIVERY_TIMEOUT,
+    bcast_body = f"broadcast from alpha {stamp}"
+    A.send(ha, aa["agent_id"], conv2, f"bc-{stamp}", bcast_body)
+    wait_until(lambda: [m for m in B.exact(bcast_body)], DELIVERY_TIMEOUT,
                "broadcast A->B")
     ok("broadcast A->B delivered")
 
     # --- duplicate client_message_id is not re-delivered ---
-    A.send(ha, aa["agent_id"], conv2, f"bc-{stamp}", "broadcast from alpha")
+    A.send(ha, aa["agent_id"], conv2, f"bc-{stamp}", bcast_body)
     time.sleep(DELIVERY_TIMEOUT)
-    n = len([m for m in B.search("broadcast from alpha")])
+    n = len([m for m in B.exact(bcast_body)])
     assert_(n == 1, f"duplicate cmid not re-delivered (count={n})")
 
     # --- human chat via the web form fallback is visible to both buses ---
     human_body = f"human hello {stamp}"
-    form_post(f"/pins/{session['room_id']}/conversations/{conv2}/messages",
-              {"body": human_body})
-    wait_until(lambda: [m for m in A.search(human_body)], DELIVERY_TIMEOUT, "human msg on bus A")
+    human_post(session["room_id"], f"e2e-a-{stamp}", "alpha passphrase 123",
+               "broadcast", human_body)
+    wait_until(lambda: [m for m in A.exact(human_body)], DELIVERY_TIMEOUT, "human msg on bus A")
     ok("human chat visible on bus A")
-    wait_until(lambda: [m for m in B.search(human_body)], DELIVERY_TIMEOUT, "human msg on bus B")
+    wait_until(lambda: [m for m in B.exact(human_body)], DELIVERY_TIMEOUT, "human msg on bus B")
+    ok("human chat visible on bus B")
+
     # --- status propagation both ways (status_message carries the text) ---
     B.tool("set_status", {"harness_id": hb, "agent_id": ab["agent_id"],
                           "status": "crunching the billing export"})
@@ -247,38 +278,59 @@ def main():
     st = pin.status(a_tok, session["room_id"])
     assert_(set(st["bridges"]) == {"alpha", "beta"}, f"pin_status bridges {st['bridges']}")
 
-    # --- pin_stop tears the pin down for everyone ---
-    assert_(pin.tool("pin_stop", {"token": b_tok, "room_id": session["room_id"]}) == {"left": True},
+    # --- pin_stop: owner leaving tears the pin down for everyone ---
+    assert_(pin.tool("pin_stop", {"token": a_tok, "room_id": session["room_id"]}) == {"left": True},
             "pin_stop succeeds")
-    gone = pin.status(a_tok, session["room_id"])
+    gone = pin.status(b_tok, session["room_id"])
     assert_(gone.get("error") == "unknown pin", f"room deleted after owner leave: {gone}")
     ok("pin_stop teardown cascades")
 
     print(f"E2E OK ({checks} checks)")
 
 
-def form_post(path, fields):
-    """POST a form with a scraped CSRF token + session cookie (HTTP fallback path)."""
+def human_post(room_id, username, passphrase, title, body):
+    """Log in as a browser user and post into the pin conversation titled `title`.
+
+    Exercises the HTTP form fallback: home page CSRF -> POST /login (session
+    cookie) -> GET /pins/<id> (find the conversation link) -> POST message.
+    """
     import http.cookiejar
     import re
     import urllib.parse
 
     cj = http.cookiejar.CookieJar()
     op = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(cj))
-    base = CLOTHESPIN
 
-    with op.open(base + "/") as page:
-        html = page.read().decode()
-        csrf = re.search(r'name="_csrf_token" value="([^"]+)"', html).group(1)
-    data = "_csrf_token=" + urllib.parse.quote(csrf)
-    for k, v in fields.items():
-        data += "&" + k + "=" + urllib.parse.quote(v)
-    req = urllib.request.Request(base + path, data=data.encode(),
-                                 headers={"Content-Type": "application/x-www-form-urlencoded"})
-    try:
-        op.open(req)
-    except urllib.error.HTTPError as e:
-        fail("form post", f"{e.code}")
+    def get(path):
+        with op.open(CLOTHESPIN + path) as r:
+            return r.read().decode()
+
+    def post(path, fields, csrf):
+        data = "_csrf_token=" + urllib.parse.quote(csrf)
+        for k, v in fields.items():
+            data += "&" + k + "=" + urllib.parse.quote(str(v))
+        req = urllib.request.Request(
+            CLOTHESPIN + path, data=data.encode(),
+            headers={"Content-Type": "application/x-www-form-urlencoded"})
+        try:
+            return op.open(req).read().decode()
+        except urllib.error.HTTPError as e:
+            fail("human post", f"{path} -> {e.code}")
+
+    home = get("/")
+    csrf = re.search(r'name="_csrf_token" value="([^"]+)"', home).group(1)
+    post("/login", {"username": username, "passphrase": passphrase}, csrf)
+
+    room_html = get(f"/pins/{room_id}")
+    m = re.search(rf'cid=([0-9a-f-]+)[^>]*>[^<]*{re.escape(title)}', room_html) \
+        or re.search(rf'{re.escape(title)}.*?cid=([0-9a-f-]+)', room_html, re.S)
+    if not m:
+        fail("human post", f"conversation '{title}' not found on room page")
+    cid = m.group(1)
+
+    csrf2 = re.search(r'name="_csrf_token" value="([^"]+)"', room_html).group(1)
+    post(f"/pins/{room_id}/conversations/{cid}/messages",
+         {"body": body, "client_message_id": f"human-{int(time.time()*1000)}"}, csrf2)
 
 
 if __name__ == "__main__":

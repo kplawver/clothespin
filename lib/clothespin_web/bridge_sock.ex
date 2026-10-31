@@ -143,28 +143,30 @@ defmodule ClothespinWeb.BridgeSock do
              client_message_id: frame["client_message_id"] || "",
              body: frame["body"] || ""
            }) do
-      payload = Relay.message_payload(message, conversation)
+      unless duplicate do
+        payload = Relay.message_payload(message, conversation)
 
-      # Browsers see everything.
-      Endpoint.broadcast_from(self(), "room:#{room.id}", "message_new", payload)
+        # Browsers see everything.
+        Endpoint.broadcast_from(self(), "room:#{room.id}", "message_new", payload)
 
-      # Other bridges: direct → only the recipient site; broadcast → all but us.
-      routing = Relay.route(message)
+        # Other bridges: direct → only the recipient site; broadcast → all but us.
+        routing = Relay.route(message)
 
-      targets =
-        (routing.direct_sites ++ if(routing.broadcast, do: SiteRegistry.sites(room.id), else: []))
-        |> List.delete(site)
-        |> Enum.uniq()
+        targets =
+          (routing.direct_sites ++ if(routing.broadcast, do: SiteRegistry.sites(room.id), else: []))
+          |> List.delete(site)
+          |> Enum.uniq()
 
-      Enum.each(targets, fn target_site ->
-        case SiteRegistry.site_pid(room.id, target_site) do
-          nil ->
-            :ok
+        Enum.each(targets, fn target_site ->
+          case SiteRegistry.site_pid(room.id, target_site) do
+            nil ->
+              :ok
 
-          pid ->
-            send(pid, {:push, Jason.encode!(%{op: "message_new", payload: payload})})
-        end
-      end)
+            pid ->
+              send(pid, {:push, Jason.encode!(%{op: "message_new", payload: payload})})
+          end
+        end)
+      end
 
       reply(ref, %{message_id: message.id, duplicate: duplicate}, state)
     else
