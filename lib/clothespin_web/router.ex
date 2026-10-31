@@ -28,6 +28,7 @@ defmodule ClothespinWeb.Router do
 
     get "/join/:token", PinController, :join
     post "/join/:token", PinController, :join_submit
+    get "/bridge", BridgeController, :upgrade
   end
 
   # Other scopes may use custom stacks.
