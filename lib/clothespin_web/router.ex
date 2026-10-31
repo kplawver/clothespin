@@ -24,6 +24,7 @@ defmodule ClothespinWeb.Router do
     post "/pins/:id/invite", PinController, :invite
     post "/pins/:id/bridge-token", PinController, :bridge_token
     delete "/pins/:id/leave", PinController, :leave
+    post "/pins/:room_id/conversations/:conversation_id/messages", PinController, :post_message
 
     get "/join/:token", PinController, :join
     post "/join/:token", PinController, :join_submit

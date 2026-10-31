@@ -84,6 +84,7 @@ defmodule Clothespin.RelayTest do
       }
 
       assert {:ok, _, false} = Relay.record_message(room, Map.put(base, :body, "one"))
+
       assert {:error, :client_message_id_conflict} =
                Relay.record_message(room, Map.put(base, :body, "two"))
     end
@@ -97,7 +98,9 @@ defmodule Clothespin.RelayTest do
                    conversation: conversation,
                    sender_key: sender,
                    sender_name: sender,
-                   sender_site: String.replace(sender, ~r/^agent:|:.*/, "") |> then(fn _ -> String.split(sender, ":") |> Enum.at(1) end),
+                   sender_site:
+                     String.replace(sender, ~r/^agent:|:.*/, "")
+                     |> then(fn _ -> String.split(sender, ":") |> Enum.at(1) end),
                    client_message_id: "same-cmid",
                    body: "from #{sender}"
                  })
@@ -189,8 +192,16 @@ defmodule Clothespin.RelayTest do
   describe "snapshot/2" do
     test "returns last messages ascending, agents, conversations", %{room: room} do
       conversation = conv(room)
-      for i <- 1..3, do: Relay.record_message(room, message(room, conversation, "m-#{i}", "body #{i}"))
-      Relay.record_agent_event(room, %{site_name: "alpha", agent_ref: "a-1", external_id: "x", event: "online"})
+
+      for i <- 1..3,
+          do: Relay.record_message(room, message(room, conversation, "m-#{i}", "body #{i}"))
+
+      Relay.record_agent_event(room, %{
+        site_name: "alpha",
+        agent_ref: "a-1",
+        external_id: "x",
+        event: "online"
+      })
 
       snap = Relay.snapshot(room, 2)
       assert Enum.map(snap.messages, & &1.body) == ["body 2", "body 3"]

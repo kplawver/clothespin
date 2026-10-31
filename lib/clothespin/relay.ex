@@ -44,7 +44,8 @@ defmodule Clothespin.Relay do
           Repo.insert(changeset,
             on_conflict: :nothing,
             conflict_target:
-              {:unsafe_fragment, "(room_id, origin_site, origin_ref) WHERE origin_site IS NOT NULL"}
+              {:unsafe_fragment,
+               "(room_id, origin_site, origin_ref) WHERE origin_site IS NOT NULL"}
           )
           |> case do
             {:ok, _maybe_conflicted} ->
@@ -113,8 +114,8 @@ defmodule Clothespin.Relay do
     replace =
       ([:external_id, :state] ++
          if(status_message, do: [:status_message], else: []) ++
-           if(touch, do: [:last_seen_at], else: []) ++
-           if(attrs[:event] == "offline", do: [:status_message], else: []))
+         if(touch, do: [:last_seen_at], else: []) ++
+         if(attrs[:event] == "offline", do: [:status_message], else: []))
       |> Enum.uniq()
 
     %RoomAgent{}

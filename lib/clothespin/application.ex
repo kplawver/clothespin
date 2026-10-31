@@ -12,8 +12,9 @@ defmodule Clothespin.Application do
       Clothespin.Repo,
       {DNSCluster, query: Application.get_env(:clothespin, :dns_cluster_query) || :ignore},
       {Phoenix.PubSub, name: Clothespin.PubSub},
-      # Start a worker by calling: Clothespin.Worker.start_link(arg)
-      # {Clothespin.Worker, arg},
+      ClothespinWeb.Presence,
+      # Start the bridge site registry (step 5) before the endpoint.
+      Clothespin.SiteRegistry,
       # Start to serve requests, typically the last entry
       ClothespinWeb.Endpoint
     ]

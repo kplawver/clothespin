@@ -2,9 +2,9 @@ defmodule ClothespinWeb.PinController do
   use ClothespinWeb, :controller
 
   alias Clothespin.Pins
-  alias ClothespinWeb.UserAuth
+  alias Clothespin.Relay
 
-  plug :require_membership when action in [:show, :invite, :bridge_token, :leave]
+  plug :require_membership when action in [:show, :invite, :bridge_token, :leave, :post_message]
 
   def create(conn, %{"title" => title}) do
     user = conn.assigns.current_user
@@ -22,38 +22,30 @@ defmodule ClothespinWeb.PinController do
     end
   end
 
-  def show(conn, %{"id" => id}) do
-    room = conn.assigns.room
-    user = conn.assigns.current_user
-
+  def show(conn, %{"id" => _id}) do
     conn
-    |> assign(:members, Pins.list_members(room))
-    |> assign(:invite_url, Pins.invite_url(room, user))
+    |> assign_room_defaults()
     |> assign(:bridge_token, nil)
+    |> assign(:bridge_command, nil)
     |> render(:room)
   end
 
-  def invite(conn, %{"id" => id}) do
-    room = conn.assigns.room
-    user = conn.assigns.current_user
-
+  def invite(conn, %{"id" => _id}) do
     conn
-    |> assign(:members, Pins.list_members(room))
-    |> assign(:invite_url, Pins.invite_url(room, user))
+    |> assign_room_defaults()
     |> assign(:bridge_token, nil)
-    |> put_flash(:info, "Invite link regenerated below. It expires in 7 days.")
+    |> assign(:bridge_command, nil)
+    |> put_flash(:info, "Invite link below. It expires in 7 days.")
     |> render(:room)
   end
 
-  def bridge_token(conn, %{"id" => id}) do
+  def bridge_token(conn, %{"id" => _id}) do
     room = conn.assigns.room
     user = conn.assigns.current_user
-
     token = Pins.bridge_token(user, room)
 
     conn
-    |> assign(:members, Pins.list_members(room))
-    |> assign(:invite_url, Pins.invite_url(room, user))
+    |> assign_room_defaults()
     |> assign(:bridge_token, token)
     |> assign(:bridge_command, Pins.bridge_command(Pins.server_url(), token))
     |> render(:room)
@@ -104,7 +96,7 @@ defmodule ClothespinWeb.PinController do
     end
   end
 
-  def leave(conn, %{"id" => id}) do
+  def leave(conn, %{"id" => _id}) do
     user = conn.assigns.current_user
     room = conn.assigns.room
 
@@ -121,14 +113,47 @@ defmodule ClothespinWeb.PinController do
     end
   end
 
+  # POST /pins/:room_id/conversations/:cid/messages — HTTP fallback for the
+  # channel chat; same Relay.record_message + broadcast as the socket path.
+  def post_message(conn, %{"room_id" => room_id, "conversation_id" => cid} = params) do
+    room = conn.assigns.room
+    user = conn.assigns.current_user
+
+    with %Relay.Conversation{} = conversation <- Relay.get_conversation(room.id, cid),
+         {:ok, message, _duplicate} <-
+           Relay.record_message(room, %{
+             conversation: conversation,
+             sender_key: "human:#{user.username}",
+             sender_name: user.display_name,
+             sender_site: nil,
+             client_message_id: params["client_message_id"] || Ecto.UUID.generate(),
+             body: params["body"] || ""
+           }) do
+      payload = Relay.message_payload(message, conversation)
+
+      ClothespinWeb.Endpoint.broadcast!("room:#{room_id}", "message_new", payload)
+
+      conn
+      |> redirect(to: ~p"/pins/#{room_id}?cid=#{cid}")
+    else
+      nil ->
+        conn
+        |> put_flash(:error, "That conversation no longer exists.")
+        |> redirect(to: ~p"/pins/#{room_id}")
+
+      {:error, _reason} ->
+        conn
+        |> put_flash(:error, "Could not send that message (empty or duplicate ID).")
+        |> redirect(to: ~p"/pins/#{room_id}?cid=#{cid}")
+    end
+  end
+
   defp require_membership(conn, _opts) do
     user = conn.assigns[:current_user]
-    room = Pins.get_room(conn.path_params["id"])
+    room = Pins.get_room(conn.path_params["id"] || conn.path_params["room_id"])
 
     if user && room && Pins.member?(user, room) do
-      conn
-      |> assign(:room, room)
-      |> assign(:user_socket_token, nil)
+      assign(conn, :room, room)
     else
       conn
       |> put_flash(:error, "That pin does not exist or you are not a member.")
@@ -136,4 +161,44 @@ defmodule ClothespinWeb.PinController do
       |> halt()
     end
   end
+
+  defp assign_room_defaults(conn) do
+    room = conn.assigns.room
+    user = conn.assigns.current_user
+    snapshot = Relay.snapshot(room)
+
+    selected =
+      case conn.query_params["cid"] do
+        cid when is_binary(cid) and cid != "" ->
+          Enum.find(snapshot.conversations, &(&1.id == cid)) || latest(snapshot.conversations)
+
+        _ ->
+          latest(snapshot.conversations)
+      end
+
+    messages =
+      if selected,
+        do: Enum.filter(snapshot.messages, &(&1.conversation_id == selected.id)),
+        else: []
+
+    conn
+    |> assign(:members, Pins.list_members(room))
+    |> assign(:invite_url, Pins.invite_url(room, user))
+    |> assign(:conversations, snapshot.conversations)
+    |> assign(:selected, selected)
+    |> assign(:messages, messages)
+    |> assign(:agents, snapshot.agents)
+    |> assign(
+      :user_socket_token,
+      Phoenix.Token.sign(ClothespinWeb.Endpoint, "user_socket", %{
+        user_id: user.id,
+        room_id: room.id,
+        name: user.username
+      })
+    )
+    |> assign(:client_message_id, Ecto.UUID.generate())
+  end
+
+  defp latest([]), do: nil
+  defp latest(conversations), do: List.last(conversations)
 end

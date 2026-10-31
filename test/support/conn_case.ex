@@ -27,6 +27,7 @@ defmodule ClothespinWeb.ConnCase do
       # Import conveniences for testing with connections
       import Plug.Conn
       import Phoenix.ConnTest
+      import Phoenix.Controller, only: [get_csrf_token: 0]
       import ClothespinWeb.ConnCase
     end
   end

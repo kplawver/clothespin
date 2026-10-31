@@ -1,4 +1,10 @@
-<div class="room-page">
+<div
+  class="room-page"
+  id="room-page"
+  data-room-id={@room.id}
+  data-user-token={@user_socket_token}
+  data-selected={if @selected, do: @selected.id, else: ""}
+>
   <div class="room-header">
     <h1>{@room.title}</h1>
     <form action={~p"/pins/#{@room.id}/leave"} method="post" class="inline">
@@ -11,24 +17,74 @@
   <div class="room-layout">
     <nav>
       <h2>Conversations</h2>
-      <p class="muted">Populated by bridge traffic and web chat.</p>
+      <ul id="conversation-list">
+        <%= for conversation <- @conversations do %>
+          <li>
+            <a
+              href={~p"/pins/#{@room.id}?cid=#{conversation.id}"}
+              class={if @selected && @selected.id == conversation.id, do: "active", else: ""}
+            >
+              {conversation.title}
+            </a>
+          </li>
+        <% end %>
+      </ul>
+      <form id="open-conversation" class="new-conversation">
+        <input type="hidden" name="_csrf_token" value={get_csrf_token()} />
+        <label for="new-conversation-title">New conversation</label>
+        <input id="new-conversation-title" name="title" placeholder="Title" />
+        <button type="submit" class="secondary">Open</button>
+      </form>
     </nav>
 
     <section>
-      <div class="messages" id="messages" data-room-id={@room.id}>
-        <p class="muted">Loading…</p>
+      <div class="messages" id="messages">
+        <%= if @messages == [] do %>
+          <p class="muted" id="no-messages">
+            <%= if @selected do %>
+              No messages yet in this conversation.
+            <% else %>
+              No conversations yet — open one on the left, or wait for bridged agents to start one.
+            <% end %>
+          </p>
+        <% else %>
+          <%= for message <- @messages do %>
+            <div class="message" data-message-id={message.id}>
+              <div class="meta">
+                <span class="name">{message.sender_name}</span>
+                <span class="muted">at {message.inserted_at}</span>
+                <%= if message.recipient_site do %>
+                  <span class="muted">→ {message.recipient_site}</span>
+                <% end %>
+              </div>
+              <div class="body">{message.body}</div>
+            </div>
+          <% end %>
+        <% end %>
       </div>
-      <form id="compose" class="compose">
-        <input type="hidden" name="_csrf_token" value={get_csrf_token()} />
-        <label for="compose-body">Message</label>
-        <textarea
-          id="compose-body"
-          name="body"
-          rows="3"
-          placeholder="Message everyone in this pin…"
-        ></textarea>
-        <button type="submit">Send</button>
-      </form>
+
+      <%= if @selected do %>
+        <form
+          id="compose"
+          class="compose"
+          method="post"
+          action={~p"/pins/#{@room.id}/conversations/#{@selected.id}/messages"}
+        >
+          <input type="hidden" name="_csrf_token" value={get_csrf_token()} />
+          <input type="hidden" name="client_message_id" value={@client_message_id} />
+          <label for="compose-body">Message</label>
+          <textarea
+            id="compose-body"
+            name="body"
+            rows="3"
+            required
+            placeholder={"Message in “" <> @selected.title <> "”…"}
+          ></textarea>
+          <button type="submit">Send</button>
+        </form>
+      <% else %>
+        <p class="muted">Open a conversation to write.</p>
+      <% end %>
     </section>
 
     <aside>
@@ -40,6 +96,21 @@
           </li>
         <% end %>
       </ul>
+
+      <%= if @agents != [] do %>
+        <h2>Bridged agents</h2>
+        <ul class="participants" id="agent-list">
+          <%= for agent <- @agents do %>
+            <li data-agent-ref={agent.agent_ref}>
+              <span class="name">{agent.external_id}</span>
+              <span class="muted">@{agent.site_name}</span>
+              <div class="state">
+                {agent.state}{if agent.status_message, do: " — #{agent.status_message}"}
+              </div>
+            </li>
+          <% end %>
+        </ul>
+      <% end %>
 
       <div class="setup-block">
         <h2>Invite a teammate</h2>
@@ -64,7 +135,7 @@
         <% else %>
           <form action={~p"/pins/#{@room.id}/bridge-token"} method="post">
             <input type="hidden" name="_csrf_token" value={get_csrf_token()} />
-            <button type="submit" class="secondary">Generate bridge token</button>
+            <button type="submit" class="secondary">Generate bridge token + command</button>
           </form>
         <% end %>
       </div>
